@@ -12,6 +12,7 @@ def S(bits):
     return 2.**(bits-1)
 
 def C(x, bits):
+    assert bits != -1
     if bits > 15 or bits == 1:
         delta = 0
     else:

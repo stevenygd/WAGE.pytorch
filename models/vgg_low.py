@@ -8,15 +8,14 @@ from .wage_quantizer import WAGEQuantizer, Q
 from .wage_initializer import wage_init_
 import math
 
-__all__ = ['VGG7LP']
+__all__ = ['WAGEVGG7']
 
 class VGG(nn.Module):
     def __init__(self, wl_activate=-1, fl_activate=-1, wl_error=-1, fl_error=-1,
-                 layer_type="fixed", quant_type="", quantize_backward=False,
-                 num_classes=10, depth=16, batch_norm=False, wl_weight=-1, writer=None):
+                 layer_type="fixed", num_classes=10, depth=16,
+                 batch_norm=False, wl_weight=-1, writer=None):
 
         assert layer_type in ["wage"]
-        assert quant_type in ["nearest", "stochastic"]
 
         super(VGG, self).__init__()
         quant = lambda name : WAGEQuantizer(wl_activate, wl_error, name, writer=writer)
@@ -67,7 +66,11 @@ class VGG(nn.Module):
         for name, param in self.named_parameters():
             assert 'weight' in name
             wage_init_(param, wl_weight, name, self.weight_scale, factor=1.0)
-            self.weight_acc[name] = Q(param.data, wl_weight)
+            if wl_weight != -1:
+                self.weight_acc[name] = Q(param.data, wl_weight)
+            else:
+                self.weight_acc[name] = param.data
+
 
     def forward(self, x):
         x = self.features(x)
@@ -80,6 +83,6 @@ class Base:
     args = list()
     kwargs = dict()
 
-class VGG7LP(Base):
+class WAGEVGG7(Base):
     kwargs = {'depth':7}
 

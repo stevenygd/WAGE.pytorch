@@ -8,6 +8,14 @@ def SSE(logits, label):
     out =  0.5*((logits-target)**2).sum()
     return out
 
+def save_checkpoint(dir, epoch, **kwargs):
+    state = {
+        'epoch': epoch,
+    }
+    state.update(kwargs)
+    filepath = os.path.join(dir, 'checkpoint-%d.pt' % epoch)
+    torch.save(state, filepath)
+
 def train_epoch(loader, model, criterion, weight_quantizer, grad_quantizer,
                 writer, epoch, quant_bias=True, quant_bn=True, log_error=False,
                 wage_quantize=False, wage_grad_clip=None):
@@ -21,8 +29,6 @@ def train_epoch(loader, model, criterion, weight_quantizer, grad_quantizer,
     for i, (input_v, target) in enumerate(loader):
         step = i+epoch*len(loader)
         input_v = input_v.cuda(async=True)
-        # input is [0-1], scale to [-1,1]
-        input_v = input_v*2-1
         target = target.cuda(async=True)
         input_var = torch.autograd.Variable(input_v)
         target_var = torch.autograd.Variable(target)
@@ -91,6 +97,16 @@ def train_epoch(loader, model, criterion, weight_quantizer, grad_quantizer,
         'semi_accuracy': semi_correct / float(ttl) * 100.0,
     }
 
+def moving_average(swa_model, base_model, alpha=1, average_target="acc", swa_wl_weight=2):
+    for name, _ in base_model.named_parameters():
+        swa_acc = swa_model.weight_acc[name].data
+        swa_acc *= (1.0-alpha)
+        if average_target == "acc":
+            swa_acc += base_model.weight_acc[name].data
+        elif average_target == 'tern':
+            swa_acc += models.QW(base_model.weight_acc[name], swa_wl_weight, scale=1.0) # not applying constant scaling when averaging
+        else: raise ValueError("invalid target {}".format(average_target))
+        swa_model.weight_acc[name] = swa_acc
 
 def eval(loader, model, criterion, wage_quantizer=None):
     loss_sum = 0.0
@@ -103,12 +119,14 @@ def eval(loader, model, criterion, wage_quantizer=None):
     # WAGE quantize 8-bits accumulation into ternary before forward
     # assume no batch norm
     for name, param in model.named_parameters():
-        param.data = wage_quantizer(model.weight_acc[name], model.weight_scale[name])
+        if wage_quantizer != None:
+            param.data = wage_quantizer(model.weight_acc[name], model.weight_scale[name])
+        else:
+            param.data = model.weight_acc[name]/model.weight_scale[name] # apply constant scaling to full precision model
 
     with torch.no_grad():
         for i, (input_v, target) in enumerate(loader):
             input_v = input_v.cuda(async=True)
-            input_v = input_v*2-1
             target = target.cuda(async=True)
 
             output = model(input_v)

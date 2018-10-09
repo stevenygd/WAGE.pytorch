@@ -4,8 +4,8 @@ python train.py \
     --dataset CIFAR10 \
     --data_path ./data \
     --dir ./checkpoint/wage-replicate/sgd \
-    --model VGG7LP \
-    --epochs=200 \
+    --model WAGEVGG7 \
+    --epochs=300 \
     --lr_init 8 \
     --log-name wage-replicate/wage/ \
     --wl-weight 2 \

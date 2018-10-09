@@ -49,8 +49,6 @@ parser.add_argument('--swa', action='store_true',
                     help='swa usage flag (default: off)')
 parser.add_argument('--swa_start', type=float, default=161, metavar='N',
                     help='SWA start epoch number (default: 161)')
-parser.add_argument('--swa_lr', type=float, default=0.05, metavar='LR',
-                    help='SWA LR (default: 0.05)')
 parser.add_argument('--swa_c_epochs', type=int, default=1, metavar='N',
                     help='SWA model collection frequency/cycle length in epochs (default: 1)')
 parser.add_argument('--seed', type=int, default=200, metavar='N',
@@ -92,12 +90,6 @@ parser.add_argument('--layer-type', type=str, default="fixed", metavar='S',
 parser.add_argument('--quant-type', type=str, default='stochastic', metavar='S',
                     choices=["stochastic", "nearest"],
                     help='rounding method, stochastic or nearest ')
-parser.add_argument('--quant-backward', action='store_true', default=False,
-                    help='not quantize backward (default: off)')
-parser.add_argument('--no-quant-bias', action='store_true',
-                    help='not quantize bias (default: off)')
-parser.add_argument('--no-quant-bn', action='store_true',
-                    help='not quantize batch norm (default: off)')
 
 args = parser.parse_args()
 
@@ -163,9 +155,11 @@ if args.dataset=="CIFAR10":
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
     transform_test = transforms.Compose([
         transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
     train_set = ds(path, train=True, download=True, transform=transform_train)
     val_set = ds(path, train=True, download=True, transform=transform_test)
@@ -212,30 +206,44 @@ loaders = {
 # Build model
 print('Model: {}'.format(args.model))
 model_cfg = getattr(models, args.model)
-if 'LP' in args.model and args.wl_activate == -1 and args.wl_error == -1:
-    raise Exception("Using low precision model but not quantizing activation or error")
-elif 'LP' in args.model and (args.wl_activate != -1 or args.wl_error != -1):
+if 'WAGE' in args.model and (args.wl_activate != -1 or args.wl_error != -1):
     model_cfg.kwargs.update(
         {"wl_activate":args.wl_activate, "fl_activate":args.fl_activate,
          "wl_error":args.wl_error, "fl_error":args.fl_error,
-         "layer_type":args.layer_type, "quant_type":args.quant_type,
-         "quantize_backward": args.quant_backward})
-    if args.layer_type == "wage":
-        model_cfg.kwargs.update({"wl_weight":args.wl_weight})
+         "wl_weight":args.wl_weight,
+         "layer_type":args.layer_type})
 
-if args.log_error:
-    model = model_cfg.base(
-            *model_cfg.args,
-            num_classes=num_classes, writer=writer,
-            **model_cfg.kwargs)
-else:
-    model = model_cfg.base(
-            *model_cfg.args,
-            num_classes=num_classes, writer=None,
-            **model_cfg.kwargs)
+model_writer = writer if args.log_error else None
+model = model_cfg.base(
+    *model_cfg.args,
+    num_classes=num_classes, writer=model_writer,
+    **model_cfg.kwargs)
 model.cuda()
 for name, param_acc in model.weight_acc.items():
     model.weight_acc[name] = param_acc.cuda()
+
+if args.swa:
+    print('SWA training')
+    model_names = ['full_tern', 'full_acc', 'low_tern', 'low_acc']
+    swa_model_dict = {}
+    for model_name in model_names:
+        if 'full' in model_name:
+            model_cfg.kwargs.update({"wl_activate":-1, "fl_activate":-1, "wl_error":-1,
+                                     "fl_error":-1 , "wl_weight": -1, "layer_type":args.layer_type})
+        elif 'low' in model_name:
+            model_cfg.kwargs.update(
+                {"wl_activate":args.wl_activate, "fl_activate":args.fl_activate,
+                 "wl_error":args.wl_error, "fl_error":args.fl_error,
+                 "wl_weight":args.wl_weight, "layer_type":args.layer_type})
+        else: raise ValueError("invalid model name")
+        swa_model = model_cfg.base(
+            *model_cfg.args, num_classes=num_classes, **model_cfg.kwargs)
+        swa_model.cuda()
+        for name, param_acc in swa_model.weight_acc.items():
+            swa_model.weight_acc[name] = param_acc.cuda()
+        swa_model.weight_scale = model.weight_scale
+        swa_model_dict[model_name] = swa_model
+    swa_n = 0
 
 assert args.weight_type == "wage"
 criterion = utils.SSE
@@ -254,7 +262,6 @@ if args.resume is not None:
     checkpoint = torch.load(args.resume)
     start_epoch = checkpoint['epoch']-1
     model.load_state_dict(checkpoint['state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer'])
     if args.swa:
         swa_state_dict = checkpoint['swa_state_dict']
         if swa_state_dict is not None:
@@ -291,6 +298,23 @@ for epoch in range(start_epoch, args.epochs):
     )
     log_result(writer, "train", train_res, epoch+1)
 
+    if args.swa and (epoch + 1) >= args.swa_start and (epoch + 1 - args.swa_start) % args.swa_c_epochs == 0:
+        decay = 1.0 / (swa_n+1)
+        for swa_model_name, swa_model in swa_model_dict.items():
+            if 'tern' in swa_model_name:
+                target = 'tern'
+            elif 'acc' in swa_model_name:
+                target = 'acc'
+            else: raise ValueError("invalid swa model name {}".format(swa_model_name))
+            utils.moving_average(swa_model, model, decay,
+                                 average_target=target, swa_wl_weight=args.wl_weight)
+            if 'full' in swa_model_name:
+                test_res = utils.eval(loaders['test'], swa_model, criterion, None)
+            if 'low' in swa_model_name:
+                test_res = utils.eval(loaders['test'], swa_model, criterion, weight_quantizer)
+            log_result(writer, '{}-test'.format(swa_model_name), test_res, epoch+1)
+        swa_n += 1
+
     # Write parameters
     if args.log_distribution:
         for name, param in model.named_parameters():
@@ -316,4 +340,13 @@ for epoch in range(start_epoch, args.epochs):
         table = table.split('\n')[2]
     print(table)
 
+    for name, param in model.named_parameters():
+        param.data = model.weight_acc[name]
 
+    if (epoch+1) % args.save_freq == 0 or (epoch+1) == args.swa_start:
+        utils.save_checkpoint(
+            dir_name,
+            epoch + 1,
+            state_dict=model.state_dict(),
+            swa_n=swa_n if args.swa else None,
+        )
