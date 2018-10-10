@@ -12,6 +12,7 @@ import models
 import numpy as np
 from tensorboardX import SummaryWriter
 from torch.utils.data.sampler import SubsetRandomSampler
+import json
 
 parser = argparse.ArgumentParser(description='SGD/SWA training')
 parser.add_argument('--dir', type=str, default=None, required=True,
@@ -49,6 +50,8 @@ parser.add_argument('--swa', action='store_true',
                     help='swa usage flag (default: off)')
 parser.add_argument('--swa_start', type=float, default=161, metavar='N',
                     help='SWA start epoch number (default: 161)')
+parser.add_argument('--swa_lr', type=float, default=1./8., metavar='N',
+                    help='SWA learning rate (default: 1/8)')
 parser.add_argument('--swa_c_epochs', type=int, default=1, metavar='N',
                     help='SWA model collection frequency/cycle length in epochs (default: 1)')
 parser.add_argument('--seed', type=int, default=200, metavar='N',
@@ -224,7 +227,7 @@ for name, param_acc in model.weight_acc.items():
 
 if args.swa:
     print('SWA training')
-    model_names = ['full_tern', 'full_acc', 'low_tern', 'low_acc']
+    model_names = ['full_tern', 'low_tern', 'low_acc']
     swa_model_dict = {}
     for model_name in model_names:
         # use the same model config, i.e., quantizing activations
@@ -241,12 +244,12 @@ assert args.weight_type == "wage"
 criterion = utils.SSE
 
 def schedule(epoch):
-    if epoch < 200:
-        return 8.0
-    elif epoch < 250:
-        return 1
-    else:
-        return 1/8.
+    if epoch < 200: lr = 8.0
+    elif epoch < 250: lr = 1
+    else: lr = 1/8.
+    if args.swa and (epoch+1) > args.swa_start:
+        lr =  args.swa_lr
+    return lr
 
 start_epoch = 0
 if args.resume is not None:
@@ -283,6 +286,7 @@ for epoch in range(start_epoch, args.epochs):
     )
     log_result(writer, "train", train_res, epoch+1)
 
+    all_result = {}
     if args.swa and (epoch + 1) >= args.swa_start and (epoch + 1 - args.swa_start) % args.swa_c_epochs == 0:
         decay = 1.0 / (swa_n+1)
         for swa_model_name, swa_model in swa_model_dict.items():
@@ -298,7 +302,8 @@ for epoch in range(start_epoch, args.epochs):
             elif 'low' in swa_model_name:
                 test_res = utils.eval(loaders['test'], swa_model, criterion, weight_quantizer)
             else: raise ValueError("invalid swa model name {}".format(swa_model_name))
-            log_result(writer, '{}-test'.format(swa_model_name), test_res, epoch+1)
+            log_result(writer, '{}_test'.format(swa_model_name), test_res, epoch+1)
+            all_result["{}_test".format(swa_model_name)] = test_res
         swa_n += 1
 
     # Write parameters
@@ -311,9 +316,11 @@ for epoch in range(start_epoch, args.epochs):
 
     # Validation
     test_res = utils.eval(loaders['test'], model, criterion, None)
-    log_result(writer, "acc-test", test_res, epoch+1)
+    log_result(writer, "base_acc_test", test_res, epoch+1)
+    all_result["base_acc_test"] = test_res
     test_res = utils.eval(loaders['test'], model, criterion, weight_quantizer)
-    log_result(writer, "tern-test", test_res, epoch+1)
+    log_result(writer, "base_test", test_res, epoch+1)
+    all_result["base_test"] = test_res
 
     time_ep = time.time() - time_ep
     values = [epoch + 1, lr, train_res['loss'], train_res['accuracy'],
@@ -335,3 +342,10 @@ for epoch in range(start_epoch, args.epochs):
             acc_dict=model.weight_acc,
             swa_n=swa_n if args.swa else None,
         )
+
+with open("swa_start_{}_swa_lr{}.txt".format(int(args.swa_start), args.swa_lr), "a") as f:
+    names = ['base', 'low_tern', 'full_tern', 'low_acc']
+    record = [args.seed]
+    for n in names:
+        record.append(100-all_result['{}_test'.format(n)]['accuracy'])
+    f.write(" ".join([str(i) for i in record])+"\n")
