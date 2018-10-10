@@ -5,7 +5,7 @@ python train.py \
     --data_path ./data \
     --dir ./checkpoint/wage-replicate/sgd \
     --model VGG7LP \
-    --epochs=200 \
+    --epochs=300 \
     --log-name wage-replicate/wage/ \
     --wl-weight 2 \
     --wl-grad 8 \
