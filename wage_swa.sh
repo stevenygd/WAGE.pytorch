@@ -1,6 +1,6 @@
 #! /bin/bash
 
-python train.py \
+CUDA_VISIBLE_DEVICES=1 python train.py \
        --dataset CIFAR10 \
        --data_path ./data \
        --dir ./checkpoint/wage-replicate/sgd \
@@ -18,7 +18,9 @@ python train.py \
        --weight-type wage \
        --grad-type wage \
        --layer-type wage \
-       --seed 100 \
+       --seed 101 \
        --batch_size 128 \
        --wd 0 \
-       --save_freq 25;
+       --save_freq 25 \
+       --log-distribution \
+       --resume checkpoint/wage-replicate/sgd-seed-101/checkpoint-260.pt \

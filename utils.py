@@ -102,9 +102,9 @@ def moving_average(swa_model, base_model, alpha=1, average_target="acc", swa_wl_
         swa_acc = swa_model.weight_acc[name].data
         swa_acc *= (1.0-alpha)
         if average_target == "acc":
-            swa_acc += base_model.weight_acc[name].data
+            swa_acc += base_model.weight_acc[name].data * alpha
         elif average_target == 'tern':
-            swa_acc += models.QW(base_model.weight_acc[name], swa_wl_weight, scale=1.0) # not applying constant scaling when averaging
+            swa_acc += models.QW(base_model.weight_acc[name], swa_wl_weight, scale=1.0) * alpha # not applying constant scaling when averaging
         else: raise ValueError("invalid target {}".format(average_target))
         swa_model.weight_acc[name] = swa_acc
 

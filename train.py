@@ -227,15 +227,7 @@ if args.swa:
     model_names = ['full_tern', 'full_acc', 'low_tern', 'low_acc']
     swa_model_dict = {}
     for model_name in model_names:
-        if 'full' in model_name:
-            model_cfg.kwargs.update({"wl_activate":-1, "fl_activate":-1, "wl_error":-1,
-                                     "fl_error":-1 , "wl_weight": -1, "layer_type":args.layer_type})
-        elif 'low' in model_name:
-            model_cfg.kwargs.update(
-                {"wl_activate":args.wl_activate, "fl_activate":args.fl_activate,
-                 "wl_error":args.wl_error, "fl_error":args.fl_error,
-                 "wl_weight":args.wl_weight, "layer_type":args.layer_type})
-        else: raise ValueError("invalid model name")
+        # use the same model config, i.e., quantizing activations
         swa_model = model_cfg.base(
             *model_cfg.args, num_classes=num_classes, **model_cfg.kwargs)
         swa_model.cuda()
@@ -261,14 +253,7 @@ if args.resume is not None:
     print('Resume training from %s' % args.resume)
     checkpoint = torch.load(args.resume)
     start_epoch = checkpoint['epoch']-1
-    model.load_state_dict(checkpoint['state_dict'])
-    if args.swa:
-        swa_state_dict = checkpoint['swa_state_dict']
-        if swa_state_dict is not None:
-            swa_model.load_state_dict(swa_state_dict)
-        swa_n_ckpt = checkpoint['swa_n']
-        if swa_n_ckpt is not None:
-            swa_n = swa_n_ckpt
+    model.weight_acc = checkpoint['acc_dict']
 
 # Prepare logging
 columns = ['ep', 'lr', 'tr_loss', 'tr_acc', 'tr_acc2',
@@ -310,8 +295,9 @@ for epoch in range(start_epoch, args.epochs):
                                  average_target=target, swa_wl_weight=args.wl_weight)
             if 'full' in swa_model_name:
                 test_res = utils.eval(loaders['test'], swa_model, criterion, None)
-            if 'low' in swa_model_name:
+            elif 'low' in swa_model_name:
                 test_res = utils.eval(loaders['test'], swa_model, criterion, weight_quantizer)
+            else: raise ValueError("invalid swa model name {}".format(swa_model_name))
             log_result(writer, '{}-test'.format(swa_model_name), test_res, epoch+1)
         swa_n += 1
 
@@ -324,8 +310,10 @@ for epoch in range(start_epoch, args.epochs):
                 "gradient/%s"%name, param.grad.clone().cpu().data.numpy(), epoch)
 
     # Validation
+    test_res = utils.eval(loaders['test'], model, criterion, None)
+    log_result(writer, "acc-test", test_res, epoch+1)
     test_res = utils.eval(loaders['test'], model, criterion, weight_quantizer)
-    log_result(writer, "test", test_res, epoch+1)
+    log_result(writer, "tern-test", test_res, epoch+1)
 
     time_ep = time.time() - time_ep
     values = [epoch + 1, lr, train_res['loss'], train_res['accuracy'],
@@ -340,13 +328,10 @@ for epoch in range(start_epoch, args.epochs):
         table = table.split('\n')[2]
     print(table)
 
-    for name, param in model.named_parameters():
-        param.data = model.weight_acc[name]
-
     if (epoch+1) % args.save_freq == 0 or (epoch+1) == args.swa_start:
         utils.save_checkpoint(
             dir_name,
             epoch + 1,
-            state_dict=model.state_dict(),
+            acc_dict=model.weight_acc,
             swa_n=swa_n if args.swa else None,
         )
