@@ -37,7 +37,7 @@ parser.add_argument('--save_freq', type=int, default=25, metavar='N',
                     help='save frequency (default: 25)')
 parser.add_argument('--eval_freq', type=int, default=5, metavar='N',
                     help='evaluation frequency (default: 5)')
-parser.add_argument('--lr_init', type=float, default=0.1, metavar='LR',
+parser.add_argument('--lr_init', type=float, default=8.0, metavar='LR',
                     help='initial learning rate (default: 0.01)')
 parser.add_argument('--lr-type', type=str, default="wilson", metavar='S',
                     choices=["wilson", "gupta", "const", "wage"],
@@ -93,6 +93,13 @@ parser.add_argument('--layer-type', type=str, default="fixed", metavar='S',
 parser.add_argument('--quant-type', type=str, default='stochastic', metavar='S',
                     choices=["stochastic", "nearest"],
                     help='rounding method, stochastic or nearest ')
+
+# Leraning rate schedule
+parser.add_argument('--lr_changes', type=int,  nargs='+', help='Epoches when to change the learning rate',
+                    default=[200,250,300])
+parser.add_argument('--lr_schedules', type=float, nargs='+', help='<Required> Set flag',
+                    default=[8,1,0.125])
+
 
 args = parser.parse_args()
 
@@ -244,9 +251,10 @@ assert args.weight_type == "wage"
 criterion = utils.SSE
 
 def schedule(epoch):
-    if epoch < 200: lr = 8.0
-    elif epoch < 250: lr = 1
-    else: lr = 1/8.
+    lr = args.lr_init
+    for e,l in zip(args.lr_changes, args.lr_schedules):
+        if epoch >= e:
+            lr = l
     if args.swa and (epoch+1) > args.swa_start:
         lr =  args.swa_lr
     return lr
@@ -343,9 +351,9 @@ for epoch in range(start_epoch, args.epochs):
             swa_n=swa_n if args.swa else None,
         )
 
-with open("swa_start_{}_swa_lr{}.txt".format(int(args.swa_start), args.swa_lr), "a") as f:
+with open("swa_start_{}_swa_lr{}_lr{}.txt".format(int(args.swa_start), args.swa_lr, "_".join([str(x) for x in args.lr_schedules])), "a") as f:
     names = ['base', 'low_tern', 'full_tern', 'low_acc']
     record = [args.seed]
     for n in names:
         record.append(100-all_result['{}_test'.format(n)]['accuracy'])
-    f.write(" ".join([str(i) for i in record])+"\n")
+    f.write("\t".join([str(i) for i in record])+"\n")

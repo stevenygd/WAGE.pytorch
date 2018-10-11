@@ -1,17 +1,17 @@
 #! /bin/bash
 
-for seed in "100" "200" "300" "400"; do
+for seed in "700" "800"; do
     python3 train.py \
             --dataset CIFAR10 \
             --data_path ./data \
             --dir ./checkpoint/wage-replicate/sgd \
             --model WAGEVGG7 \
-            --epochs=300 \
+            --epochs 300 \
             --lr_init 8 \
             --log-name wage-replicate/wage/ \
             --swa \
-            --swa_start 210 \
-            --swa_lr 1 \
+            --swa_start 260 \
+            --swa_lr 0.125 \
             --wl-weight 2 \
             --wl-grad 8 \
             --wl-activate 8 \

@@ -1,17 +1,15 @@
 #! /bin/bash
 
-for seed in "100" "200" "300" "400"; do
+for seed in "400" "500"; do
     python3 train.py \
             --dataset CIFAR10 \
             --data_path ./data \
             --dir ./checkpoint/wage-replicate/sgd \
             --model WAGEVGG7 \
             --epochs=300 \
-            --lr_init 8 \
-            --log-name wage-replicate/wage/ \
+            --log-name wage-replicate/wage/swa210_lr8lr2_seed400800 \
             --swa \
-            --swa_start 210 \
-            --swa_lr 1 \
+            --swa_start 200 \
             --wl-weight 2 \
             --wl-grad 8 \
             --wl-activate 8 \
@@ -24,5 +22,9 @@ for seed in "100" "200" "300" "400"; do
             --wd 0 \
             --save_freq 25 \
             --log-distribution \
-            --seed ${seed};
+            --seed ${seed} \
+            --lr_init 8 \
+            --lr_changes 210 \
+            --lr_schedules 2 \
+            --swa_lr 2;
 done

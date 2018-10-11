@@ -1,6 +1,6 @@
 #! /bin/bash
 
-for seed in "100" "200" "300" "400"; do
+for seed in "700" "800"; do
     python3 train.py \
             --dataset CIFAR10 \
             --data_path ./data \
