@@ -116,15 +116,15 @@ def eval(loader, model, criterion, wage_quantizer=None):
     model.eval()
     cnt = 0
 
-    # WAGE quantize 8-bits accumulation into ternary before forward
-    # assume no batch norm
-    for name, param in model.named_parameters():
-        if wage_quantizer != None:
-            param.data = wage_quantizer(model.weight_acc[name], model.weight_scale[name])
-        else:
-            param.data = model.weight_acc[name]/model.weight_scale[name] # apply constant scaling to full precision model
-
     with torch.no_grad():
+        # WAGE quantize 8-bits accumulation into ternary before forward
+        # assume no batch norm
+        for name, param in model.named_parameters():
+            if wage_quantizer != None:
+                param.data = wage_quantizer(model.weight_acc[name], model.weight_scale[name])
+            else:
+                param.data = model.weight_acc[name]/model.weight_scale[name] # apply constant scaling to full precision model
+
         for i, (input_v, target) in enumerate(loader):
             input_v = input_v.cuda(async=True)
             target = target.cuda(async=True)

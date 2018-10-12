@@ -1,14 +1,14 @@
 #! /bin/bash
 
-# for seed in "600" "700" "800"; do
-seed=800
+dir="./checkpoint/wage/lr8lr2_210_testrun";
+seed=100;
 python3 train.py \
         --dataset CIFAR10 \
         --data_path ./data \
-        --dir ./checkpoint/wage-replicate/sgd \
+        --dir $dir \
         --model WAGEVGG7 \
         --epochs=300 \
-        --log-name wage-replicate/wage/swa210_lr8lr2_seed400800 \
+        --log-name wage-replicate/wage/lr8lr2_210_testrun \
         --swa \
         --swa_start 200 \
         --wl-weight 2 \

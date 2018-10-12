@@ -278,6 +278,21 @@ def log_result(writer, name, res, step):
     writer.add_scalar("{}/acc_perc".format(name), res['accuracy'],        step)
     writer.add_scalar("{}/err_perc".format(name), 100. - res['accuracy'], step)
 
+
+
+# Save SWA models
+swa_to_save = {}
+for swa_model_name, swa_model in swa_model_dict.items():
+    swa_to_save[swa_model_name] = swa_model.weight_acc
+
+utils.save_checkpoint(
+    dir_name,
+    0,
+    acc_dict=model.weight_acc,
+    swa_n=swa_n if args.swa else None,
+    **swa_to_save
+)
+
 for epoch in range(start_epoch, args.epochs):
     time_ep = time.time()
     lr = schedule(epoch)
@@ -320,7 +335,17 @@ for epoch in range(start_epoch, args.epochs):
             writer.add_histogram(
                 "param/%s"%name, param.clone().cpu().data.numpy(), epoch)
             writer.add_histogram(
+                "param/wacc-%s"%name,
+                model.weight_acc[name].clone().cpu().data.numpy(), epoch)
+            writer.add_histogram(
                 "gradient/%s"%name, param.grad.clone().cpu().data.numpy(), epoch)
+
+        for swa_model_name, swa_model in swa_model_dict.items():
+            # compute the histograms
+            for name, param in swa_model.named_parameters():
+                writer.add_histogram(
+                    "swa/%s/param/wacc-%s"%(swa_model_name, name),
+                    swa_model.weight_acc[name].clone().cpu().data.numpy(), epoch)
 
     # Validation
     test_res = utils.eval(loaders['test'], model, criterion, None)
@@ -344,11 +369,17 @@ for epoch in range(start_epoch, args.epochs):
     print(table)
 
     if (epoch+1) % args.save_freq == 0 or (epoch+1) == args.swa_start:
+        # Save SWA models
+        swa_to_save = {}
+        for swa_model_name, swa_model in swa_model_dict.items():
+            swa_to_save[swa_model_name] = swa_model.weight_acc
+
         utils.save_checkpoint(
             dir_name,
             epoch + 1,
             acc_dict=model.weight_acc,
             swa_n=swa_n if args.swa else None,
+            **swa_to_save
         )
 
 with open("swa_start_{}_swa_lr{}_lr{}.txt".format(int(args.swa_start), args.swa_lr, "_".join([str(x) for x in args.lr_schedules])), "a") as f:
