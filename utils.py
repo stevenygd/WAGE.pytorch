@@ -64,7 +64,6 @@ def train_epoch(loader, model, criterion, weight_quantizer, grad_quantizer,
 
         # gradient quantization
         for name, param in list(model.named_parameters())[::-1]:
-            param.grad.data = grad_quantizer(param.grad.data).data
 
             if momentum != 0:
                 if not name in model.momentum_buffer:
@@ -74,6 +73,7 @@ def train_epoch(loader, model, criterion, weight_quantizer, grad_quantizer,
                     buf = model.momentum_buffer[name]
                     buf.mul_(momentum).add_(param.grad.data)
                 param.grad.data = buf.data.clone() # wouldn't work without clone
+            param.grad.data = grad_quantizer(param.grad.data).data
 
             # Write 8-bits gradients
             if log_error:
