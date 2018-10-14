@@ -18,7 +18,7 @@ def save_checkpoint(dir, epoch, **kwargs):
 
 def train_epoch(loader, model, criterion, weight_quantizer, grad_quantizer,
                 writer, epoch, quant_bias=True, quant_bn=True, log_error=False,
-                wage_quantize=False, wage_grad_clip=None):
+                wage_quantize=False, wage_grad_clip=None, momentum=0):
     loss_sum = 0.0
     correct = 0.0
     semi_correct = 0.0
@@ -66,6 +66,15 @@ def train_epoch(loader, model, criterion, weight_quantizer, grad_quantizer,
         for name, param in list(model.named_parameters())[::-1]:
             param.grad.data = grad_quantizer(param.grad.data).data
 
+            if momentum != 0:
+                if not name in model.momentum_buffer:
+                    buf = model.momentum_buffer[name] = torch.zeros_like(param.data)
+                    buf.mul_(momentum).add_(param.grad.data)
+                else:
+                    buf = model.momentum_buffer[name]
+                    buf.mul_(momentum).add_(param.grad.data)
+                param.grad.data = buf.data.clone() # wouldn't work without clone
+
             # Write 8-bits gradients
             if log_error:
                 writer.add_histogram(
@@ -82,7 +91,7 @@ def train_epoch(loader, model, criterion, weight_quantizer, grad_quantizer,
         correct += pred.eq(target_var.data.view_as(pred)).sum()
         ttl += input_v.size()[0]
 
-        # Compute in_top_k, similar to tensorflow
+
         max_output = output.max(1, keepdim=True)
         semi_correct += torch.eq(
             output[torch.arange(pred.size(0)), target],
@@ -152,4 +161,3 @@ def eval(loader, model, criterion, wage_quantizer=None):
         'accuracy': correct / float(cnt) * 100.0,
         'semi_accuracy': semi_correct / float(cnt) * 100.0,
     }
-
