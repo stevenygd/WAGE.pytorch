@@ -42,8 +42,8 @@ parser.add_argument('--lr_init', type=float, default=8.0, metavar='LR',
 parser.add_argument('--lr-type', type=str, default="wilson", metavar='S',
                     choices=["wilson", "gupta", "const", "wage"],
                     help='learning decay schedule type ("wilson" or "gupta" or "const" or "wage")')
-parser.add_argument('--momentum', type=float, default=0.9, metavar='M',
-                    help='SGD momentum (default: 0.9)')
+parser.add_argument('--momentum', type=float, default=0.0, metavar='M',
+                    help='SGD momentum (default: 0.0)')
 parser.add_argument('--wd', type=float, default=1e-4,
                     help='weight decay (default: 1e-4)')
 parser.add_argument('--swa', action='store_true',
@@ -229,6 +229,9 @@ model = model_cfg.base(
     num_classes=num_classes, writer=model_writer,
     **model_cfg.kwargs)
 model.cuda()
+# hook momentum buffer to the model
+if args.momentum != 0:
+    model.momentum_buffer = {}
 for name, param_acc in model.weight_acc.items():
     model.weight_acc[name] = param_acc.cuda()
 
@@ -301,11 +304,12 @@ for epoch in range(start_epoch, args.epochs):
     grad_quantizer = lambda x : models.QG(x, args.wl_grad, args.wl_rand, lr)
 
     train_res = utils.train_epoch(
-            loaders['train'], model, criterion,
-            weight_quantizer, grad_quantizer, writer, epoch,
-            log_error=args.log_error,
-            wage_quantize=True,
-            wage_grad_clip=grad_clip
+        loaders['train'], model, criterion,
+        weight_quantizer, grad_quantizer, writer, epoch,
+        log_error=args.log_error,
+        wage_quantize=True,
+        wage_grad_clip=grad_clip,
+        momentum = args.momentum
     )
     log_result(writer, "train", train_res, epoch+1)
 
