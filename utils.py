@@ -28,8 +28,10 @@ def train_epoch(loader, model, criterion, weight_quantizer, grad_quantizer,
 
     for i, (input_v, target) in enumerate(loader):
         step = i+epoch*len(loader)
-        input_v = input_v.cuda(async=True)
-        target = target.cuda(async=True)
+        # input_v = input_v.cuda(async=True)
+        # target = target.cuda(async=True)
+        input_v = input_v.cuda()
+        target = target.cuda()
         input_var = torch.autograd.Variable(input_v)
         target_var = torch.autograd.Variable(target)
 
@@ -126,8 +128,11 @@ def eval(loader, model, criterion, wage_quantizer=None):
                 param.data = model.weight_acc[name]/model.weight_scale[name] # apply constant scaling to full precision model
 
         for i, (input_v, target) in enumerate(loader):
-            input_v = input_v.cuda(async=True)
-            target = target.cuda(async=True)
+            # input_v = input_v.cuda(async=True)
+            # target = target.cuda(async=True)
+
+            input_v = input_v.cuda()
+            target = target.cuda()
 
             output = model(input_v)
             loss = criterion(output, target)
