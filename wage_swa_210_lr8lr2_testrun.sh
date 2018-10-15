@@ -1,14 +1,14 @@
 #! /bin/bash
 
-dir="./checkpoint/wage/lr8lr2_210_testrun";
+name="wage/lr8lr2_210_rerun";
 seed=100;
 python3 train.py \
         --dataset CIFAR10 \
         --data_path ./data \
-        --dir $dir \
+        --dir ./checkpoint/$name \
         --model WAGEVGG7 \
         --epochs=300 \
-        --log-name wage-replicate/wage/lr8lr2_210_testrun \
+        --log-name wage-replicate/$name \
         --swa \
         --swa_start 200 \
         --wl-weight 2 \

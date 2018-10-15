@@ -13,6 +13,7 @@ import numpy as np
 from tensorboardX import SummaryWriter
 from torch.utils.data.sampler import SubsetRandomSampler
 import json
+from data_loaders import get_data_loaders
 
 parser = argparse.ArgumentParser(description='SGD/SWA training')
 parser.add_argument('--dir', type=str, default=None, required=True,
@@ -158,61 +159,6 @@ with open(os.path.join(dir_name, 'command.sh'), 'w') as f:
 assert args.dataset in ["CIFAR10"]
 print('Loading dataset {} from {}'.format(args.dataset, args.data_path))
 
-if args.dataset=="CIFAR10":
-    ds = getattr(datasets, args.dataset)
-    path = os.path.join(args.data_path, args.dataset.lower())
-    transform_train = transforms.Compose([
-        transforms.RandomCrop(32, padding=4),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-    ])
-    transform_test = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-    ])
-    train_set = ds(path, train=True, download=True, transform=transform_train)
-    val_set = ds(path, train=True, download=True, transform=transform_test)
-    test_set = ds(path, train=False, download=True, transform=transform_test)
-    if args.val_ratio != 0:
-        train_size = len(train_set)
-        indices = list(range(train_size))
-        val_size = int(args.val_ratio*train_size)
-        print("train set size {}, validation set size {}".format(train_size-val_size, val_size))
-        np.random.shuffle(indices)
-        val_idx, train_idx = indices[train_size-val_size:], indices[:train_size-val_size]
-        train_sampler = SubsetRandomSampler(train_idx)
-        val_sampler = SubsetRandomSampler(val_idx)
-    else :
-        train_sampler = None
-        val_sampler = None
-    num_classes = 10
-
-loaders = {
-    'train': torch.utils.data.DataLoader(
-        train_set,
-        batch_size=args.batch_size,
-        shuffle=(train_sampler is None),
-        sampler=train_sampler,
-        num_workers=args.num_workers,
-        pin_memory=True
-    ),
-    'val': torch.utils.data.DataLoader(
-        train_set,
-        batch_size=args.batch_size,
-        sampler=val_sampler,
-        num_workers=args.num_workers,
-        pin_memory=True
-    ),
-    'test': torch.utils.data.DataLoader(
-        test_set,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=args.num_workers,
-        pin_memory=True
-    )
-}
-
 # Build model
 print('Model: {}'.format(args.model))
 model_cfg = getattr(models, args.model)
@@ -281,7 +227,7 @@ def log_result(writer, name, res, step):
     writer.add_scalar("{}/acc_perc".format(name), res['accuracy'],        step)
     writer.add_scalar("{}/err_perc".format(name), 100. - res['accuracy'], step)
 
-
+loaders = get_data_loaders(args.dataset, args.data_path, args.val_ratio, args.batch_size, args.num_workers)
 
 # Save SWA models
 swa_to_save = {}
@@ -372,7 +318,7 @@ for epoch in range(start_epoch, args.epochs):
         table = table.split('\n')[2]
     print(table)
 
-    if (epoch+1) % args.save_freq == 0 or (epoch+1) == args.swa_start:
+    if (epoch+1) % args.save_freq == 0 or (epoch+1) >= args.swa_start:
         # Save SWA models
         swa_to_save = {}
         for swa_model_name, swa_model in swa_model_dict.items():
