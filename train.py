@@ -386,9 +386,10 @@ for epoch in range(start_epoch, args.epochs):
             **swa_to_save
         )
 
-with open("swa_start_{}_swa_lr{}_lr{}.txt".format(int(args.swa_start), args.swa_lr, "_".join([str(x) for x in args.lr_schedules])), "a") as f:
-    names = ['base', 'low_tern', 'full_tern', 'low_acc']
-    record = [args.seed]
-    for n in names:
-        record.append(100-all_result['{}_test'.format(n)]['accuracy'])
-    f.write("\t".join([str(i) for i in record])+"\n")
+if len(swa_model_dict) > 0:
+    with open("swa_start_{}_swa_lr{}_lr{}.txt".format(int(args.swa_start), args.swa_lr, "_".join([str(x) for x in args.lr_schedules])), "a") as f:
+        names = ['base', 'low_tern', 'full_tern', 'low_acc']
+        record = [args.seed]
+        for n in names:
+            record.append(100-all_result['{}_test'.format(n)]['accuracy'])
+        f.write("\t".join([str(i) for i in record])+"\n")
