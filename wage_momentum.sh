@@ -6,8 +6,7 @@ python train.py \
     --dir ./checkpoint/wage-replicate/sgd \
     --model WAGEVGG7 \
     --epochs=300 \
-    --lr_init 1 \
-    --log-name wage-momentum \
+    --log-name wage-momentum-quantaf \
     --wl-weight 2 \
     --wl-grad 8 \
     --wl-activate 8 \
@@ -21,5 +20,8 @@ python train.py \
     --layer-type wage \
     --seed 100 \
     --batch_size 128 \
+    --lr_init 2 \
+    --lr_changes 200 250 \
+    --lr_schedules .25 0.025 \
     --momentum 0.9 \
-    --wd 0;
+    --wd 0
