@@ -14,8 +14,6 @@ python train.py \
     --wl-rand 16 \
     --quant-type stochastic \
     --weight-type wage \
-    --swa \
-    --swa_start 210 \
     --grad-type wage \
     --layer-type wage \
     --seed 100 \

@@ -235,10 +235,10 @@ if args.momentum != 0:
 for name, param_acc in model.weight_acc.items():
     model.weight_acc[name] = param_acc.cuda()
 
+swa_model_dict = {}
 if args.swa:
     print('SWA training')
     model_names = ['full_tern', 'low_tern', 'low_acc']
-    swa_model_dict = {}
     for model_name in model_names:
         # use the same model config, i.e., quantizing activations
         swa_model = model_cfg.base(
