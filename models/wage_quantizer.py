@@ -21,13 +21,25 @@ def C(x, bits):
     lower = -1 + delta
     return torch.clamp(x, lower, upper)
 
+def SR(x):
+    r = torch.cuda.FloatTensor(*x.size()).uniform_()
+    return torch.floor(x+r)
+
 def Q(x, bits):
     assert bits != -1
     if bits==1:
         return torch.sign(x)
     if bits > 15:
         return x
-    return torch.round(x*S(bits))/S(bits)
+    return SR(x*S(bits))/S(bits)
+
+# def Q(x, bits):
+#     assert bits != -1
+#     if bits==1:
+#         return torch.sign(x)
+#     if bits > 15:
+#         return x
+#     return torch.round(x*S(bits))/S(bits)
 
 def QW(x, bits, scale=1.0):
     y = Q(C(x, bits), bits)
@@ -45,13 +57,16 @@ def QG(x, bits_G, bits_R, lr):
     max_entry = x.abs().max()
     assert max_entry != 0, "QG blow"
     x /= shift(max_entry)
-    norm = Q(lr*x, bits_R)
-    norm_sign = torch.sign(norm)
-    norm_abs = torch.abs(norm)
-    norm_int = torch.floor(norm_abs)
-    norm_float = norm_abs - norm_int
-    rand_float = torch.cuda.FloatTensor(*norm_float.size()).uniform_()
-    norm = norm_sign * (norm_int + 0.5*(torch.sign(norm_float-rand_float)+1))
+    # norm = Q(lr*x, bits_R)
+    norm = lr * x
+    norm = SR(norm)
+    # import pdb; pdb.set_trace()
+    # norm_sign = torch.sign(norm)
+    # norm_abs = torch.abs(norm)
+    # norm_int = torch.floor(norm_abs)
+    # norm_float = norm_abs - norm_int
+    # rand_float = torch.cuda.FloatTensor(*norm_float.size()).uniform_()
+    # norm = norm_sign * (norm_int + 0.5*(torch.sign(norm_float-rand_float)+1))
 
     return norm / S(bits_G)
 

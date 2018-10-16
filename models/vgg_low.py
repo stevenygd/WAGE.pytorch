@@ -66,6 +66,7 @@ class VGG(nn.Module):
         for name, param in self.named_parameters():
             assert 'weight' in name
             wage_init_(param, wl_weight, name, self.weight_scale, factor=1.0)
+            param = param.cuda()
             if wl_weight != -1:
                 self.weight_acc[name] = Q(param.data, wl_weight)
             else:

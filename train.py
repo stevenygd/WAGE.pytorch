@@ -170,6 +170,7 @@ if 'WAGE' in args.model and (args.wl_activate != -1 or args.wl_error != -1):
          "layer_type":args.layer_type})
 
 model_writer = writer if args.log_error else None
+num_classes = 10
 model = model_cfg.base(
     *model_cfg.args,
     num_classes=num_classes, writer=model_writer,
