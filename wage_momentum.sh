@@ -6,7 +6,7 @@ python train.py \
     --dir ./checkpoint/wage-replicate/sgd \
     --model WAGEVGG7 \
     --epochs=300 \
-    --log-name test-SR \
+    --log-name swa-QSR-orig \
     --wl-weight 2 \
     --wl-grad 8 \
     --wl-activate 8 \
@@ -21,5 +21,4 @@ python train.py \
     --lr_init 8 \
     --lr_changes 200 250 \
     --lr_schedules 1. 0.125 \
-    --momentum 0.9 \
     --wd 0

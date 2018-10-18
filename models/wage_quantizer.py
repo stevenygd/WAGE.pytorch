@@ -25,21 +25,20 @@ def SR(x):
     r = torch.cuda.FloatTensor(*x.size()).uniform_()
     return torch.floor(x+r)
 
-def Q(x, bits):
+def Q(x, bits, rtype='nearest'):
     assert bits != -1
     if bits==1:
         return torch.sign(x)
     if bits > 15:
         return x
-    return SR(x*S(bits))/S(bits)
+    # return SR(x*S(bits))/S(bits)
 
-# def Q(x, bits):
-#     assert bits != -1
-#     if bits==1:
-#         return torch.sign(x)
-#     if bits > 15:
-#         return x
-#     return torch.round(x*S(bits))/S(bits)
+    if rtype == 'stochastic':
+        return SR(x*S(bits))/S(bits)
+    elif rtype == 'nearest':
+        return torch.round(x*S(bits))/S(bits)
+    else:
+        raise Exception("Invalid rtype:%s"%rtype)
 
 def QW(x, bits, scale=1.0):
     y = Q(C(x, bits), bits)
