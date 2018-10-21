@@ -197,6 +197,16 @@ if args.swa:
         swa_model_dict[model_name] = swa_model
     swa_n = 0
 
+def swa_quantizer(weight, scale, threshold):
+    mask = weight.abs() > threshold
+    sign = weight.sign()
+    quantized = weight.clone()
+    quantized.masked_fill(mask, 0.5)
+    quantized.masked_fill(1-mask, 0)
+    quantized = quantized * sign
+    quantized = quantized / threshold
+    return quantized
+
 assert args.weight_type == "wage"
 criterion = utils.SSE
 
@@ -273,10 +283,13 @@ for epoch in range(start_epoch, args.epochs):
                                  average_target=target, swa_wl_weight=args.wl_weight)
             if 'full' in swa_model_name:
                 test_res = utils.eval(loaders['test'], swa_model, criterion, None)
+                log_result(writer, '{}_test'.format(swa_model_name), test_res, epoch+1)
             elif 'low' in swa_model_name:
-                test_res = utils.eval(loaders['test'], swa_model, criterion, weight_quantizer)
+                for threshold in [0.2, 0.22, 0.24, 0.26, 0.28, 0.3]:
+                    threshold_quantizer = lambda weight, scale: swa_quantizer(weight, scale, threshold)
+                    test_res = utils.eval(loaders['test'], swa_model, criterion, threshold_quantizer)
+                    log_result(writer, '{}_threshold{}_test'.format(swa_model_name, threshold), test_res, epoch+1)
             else: raise ValueError("invalid swa model name {}".format(swa_model_name))
-            log_result(writer, '{}_test'.format(swa_model_name), test_res, epoch+1)
             all_result["{}_test".format(swa_model_name)] = test_res
         swa_n += 1
 

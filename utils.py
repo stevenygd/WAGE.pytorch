@@ -124,7 +124,7 @@ def moving_average(swa_model, base_model, alpha=1, average_target="acc", swa_wl_
         else: raise ValueError("invalid target {}".format(average_target))
         swa_model.weight_acc[name] = swa_acc
 
-def eval(loader, model, criterion, wage_quantizer=None):
+def eval(loader, model, criterion, weight_quantizer=None):
     loss_sum = 0.0
     correct = 0.0
     semi_correct = 0.0
@@ -136,15 +136,12 @@ def eval(loader, model, criterion, wage_quantizer=None):
         # WAGE quantize 8-bits accumulation into ternary before forward
         # assume no batch norm
         for name, param in model.named_parameters():
-            if wage_quantizer != None:
-                param.data = wage_quantizer(model.weight_acc[name], model.weight_scale[name])
+            if weight_quantizer != None:
+                param.data = weight_quantizer(model.weight_acc[name], model.weight_scale[name])
             else:
                 param.data = model.weight_acc[name]/model.weight_scale[name] # apply constant scaling to full precision model
 
         for i, (input_v, target) in enumerate(loader):
-            # input_v = input_v.cuda(async=True)
-            # target = target.cuda(async=True)
-
             input_v = input_v.cuda()
             target = target.cuda()
 
