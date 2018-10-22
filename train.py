@@ -185,7 +185,7 @@ for name, param_acc in model.weight_acc.items():
 swa_model_dict = {}
 if args.swa:
     print('SWA training')
-    model_names = ['full_tern', 'low_tern', 'low_acc']
+    model_names = ['low_acc', 'full_tern', 'low_tern']
     for model_name in model_names:
         # use the same model config, i.e., quantizing activations
         swa_model = model_cfg.base(
@@ -201,10 +201,10 @@ def swa_quantizer(weight, scale, threshold):
     mask = weight.abs() > threshold
     sign = weight.sign()
     quantized = weight.clone()
-    quantized.masked_fill(mask, 0.5)
-    quantized.masked_fill(1-mask, 0)
+    quantized.masked_fill_(mask, 0.5)
+    quantized.masked_fill_(1-mask, 0)
     quantized = quantized * sign
-    quantized = quantized / threshold
+    quantized = quantized / scale
     return quantized
 
 assert args.weight_type == "wage"
