@@ -69,14 +69,21 @@ def train_epoch(loader, model, criterion, weight_quantizer, grad_quantizer,
             # param.grad.data = grad_quantizer(param.grad.data).data
 
             if momentum != 0:
+                g = param.grad.data
+                max_entry = g.abs().max()
+                g /= shift(max_entry)
+
                 if not name in model.momentum_buffer:
                     buf = model.momentum_buffer[name] = torch.zeros_like(param.data)
-                    buf.mul_(momentum).add_(param.grad.data)
+                    buf.mul_(momentum).add_(g)
                 else:
                     buf = model.momentum_buffer[name]
-                    buf.mul_(momentum).add_(param.grad.data)
+                    buf.mul_(momentum).add_(g)
 
-                model.momentum_buffer[name] = grad_quantizer(buf.data.clone())
+                norm = lr * buf.data.clone()
+                norm = models.SR(norm)
+                model.momentum_buffer[name] = norm / models.S(bits_G)
+                # model.momentum_buffer[name] = grad_quantizer(buf.data.clone())
                 # param.grad.data = buf.data.clone() # wouldn't work without clone
                 param.grad.data = model.momentum_buffer[name].clone()
             else:
