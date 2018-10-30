@@ -66,7 +66,7 @@ np.random.seed(args.seed)
 if args.log_name != "":
     log_name = args.log_name
 else:
-    log_name = "time%d"%int(time.time)
+    log_name = "time%d"%int(time.time())
 print("Logging at {}".format(log_name))
 writer = SummaryWriter(log_dir=os.path.join(".", "runs", log_name))
 

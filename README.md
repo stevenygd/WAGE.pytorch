@@ -20,6 +20,11 @@ Start training using the following scripts:
 ./wage.sh
 ```
 
+## Results 
+
+Averaging four seeds gives: 93.04% accuracy at 300 epochs.
+
+
 ## Citation
 If you find this paper or this repository helpful, please cite the original paper:
 ```bash

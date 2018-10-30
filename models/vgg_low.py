@@ -16,7 +16,9 @@ class VGG(nn.Module):
         super(VGG, self).__init__()
         quant = lambda name : WAGEQuantizer(wl_activate, wl_error, name, writer=writer)
         self.features = nn.Sequential(*[
-            WAGEQuantizer(wl_activate, -1, "input"), # only quantizing forward
+            # Turns out that the input quantization is never used in the original repo
+            # Image input should already been quantized to 8-bits - no need do it again
+            # WAGEQuantizer(wl_activate, -1, "input"), # only quantizing forward
 
             # Group 1
             nn.Conv2d(3, 128, kernel_size=3, padding=1, bias=False),
