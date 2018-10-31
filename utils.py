@@ -16,9 +16,15 @@ def save_checkpoint(dir, epoch, **kwargs):
     filepath = os.path.join(dir, 'checkpoint-%d.pt' % epoch)
     torch.save(state, filepath)
 
-def train_epoch(loader, model, criterion, weight_quantizer, grad_quantizer,
+def log_result(writer, name, res, step):
+    writer.add_scalar("{}/loss".format(name),     res['loss'],            step)
+    writer.add_scalar("{}/acc_perc".format(name), res['accuracy'],        step)
+    writer.add_scalar("{}/err_perc".format(name), 100. - res['accuracy'], step)
+
+def train_epoch(loaders, model, criterion, weight_quantizer, grad_quantizer,
                 writer, epoch, quant_bias=True, quant_bn=True, log_error=False,
-                wage_quantize=False, wage_grad_clip=None, momentum=0):
+                wage_quantize=False, wage_grad_clip=None, momentum=0,
+                cratio_swa_model_dict=None):
     loss_sum = 0.0
     correct = 0.0
     semi_correct = 0.0
@@ -26,10 +32,8 @@ def train_epoch(loader, model, criterion, weight_quantizer, grad_quantizer,
     model.train()
     ttl = 0
 
-    for i, (input_v, target) in enumerate(loader):
-        step = i+epoch*len(loader)
-        # input_v = input_v.cuda(async=True)
-        # target = target.cuda(async=True)
+    for i, (input_v, target) in enumerate(loaders['train']):
+        step = i+epoch*len(loaders['train'])
         input_v = input_v.cuda()
         target = target.cuda()
         input_var = torch.autograd.Variable(input_v)
@@ -77,7 +81,6 @@ def train_epoch(loader, model, criterion, weight_quantizer, grad_quantizer,
                     buf.mul_(momentum).add_(param.grad.data)
 
                 model.momentum_buffer[name] = grad_quantizer(buf.data.clone())
-                # param.grad.data = buf.data.clone() # wouldn't work without clone
                 param.grad.data = model.momentum_buffer[name].clone()
             else:
                 param.grad.data = grad_quantizer(param.grad.data).data
@@ -98,12 +101,28 @@ def train_epoch(loader, model, criterion, weight_quantizer, grad_quantizer,
         correct += pred.eq(target_var.data.view_as(pred)).sum()
         ttl += input_v.size()[0]
 
-
         max_output = output.max(1, keepdim=True)
         semi_correct += torch.eq(
             output[torch.arange(pred.size(0)), target],
             output.max(1)[0]
         ).sum()
+
+        if cratio_swa_model_dict != None:
+            for ratio, swa_model_dict in cratio_swa_model_dict.items():
+                if ((i+1) % int(ratio*len(loaders['train']))) == 0:
+                    swa_n = swa_model_dict['swa_n']
+                    decay = 1.0 / (swa_n+1)
+                    for swa_model_name, swa_model in swa_model_dict.items():
+                        if 'tern' in swa_model_name:
+                            target = 'tern'
+                        elif 'acc' in swa_model_name:
+                            target = 'acc'
+                        elif swa_model_name == 'swa_n': continue
+                        else: raise ValueError("invalid swa model name {}".format(swa_model_name))
+                        moving_average(swa_model, model, decay,
+                                       average_target=target, swa_wl_weight=swa_model.wl_weight)
+                    swa_n += 1
+                    swa_model_dict['swa_n'] = swa_n
 
     semi_correct = semi_correct.cpu().item()
     correct = correct.cpu().item()
@@ -118,7 +137,8 @@ def moving_average(swa_model, base_model, alpha=1, average_target="acc", swa_wl_
         swa_acc = swa_model.weight_acc[name].data
         swa_acc *= (1.0-alpha)
         if average_target == "acc":
-            swa_acc += base_model.weight_acc[name].data * alpha
+            w_acc = models.C(base_model.weight_acc[name].data, base_model.wl_weight)
+            swa_acc += w_acc * alpha
         elif average_target == 'tern':
             swa_acc += models.QW(base_model.weight_acc[name], swa_wl_weight, scale=1.0) * alpha # not applying constant scaling when averaging
         else: raise ValueError("invalid target {}".format(average_target))

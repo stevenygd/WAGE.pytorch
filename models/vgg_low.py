@@ -20,8 +20,6 @@ class VGG(nn.Module):
         super(VGG, self).__init__()
         quant = lambda name : WAGEQuantizer(wl_activate, wl_error, name, writer=writer)
         self.features = nn.Sequential(*[
-            WAGEQuantizer(wl_activate, -1, "input"), # only quantizing forward
-
             # Group 1
             nn.Conv2d(3, 128, kernel_size=3, padding=1, bias=False),
             nn.ReLU(inplace=True),
@@ -61,6 +59,7 @@ class VGG(nn.Module):
             WAGEQuantizer(-1, wl_error, "bf-loss") # only quantizing backward pass
         )
 
+        self.wl_weight = wl_weight
         self.weight_scale = {}
         self.weight_acc = {}
         for name, param in self.named_parameters():

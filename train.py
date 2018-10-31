@@ -55,6 +55,8 @@ parser.add_argument('--swa_lr', type=float, default=1./8., metavar='N',
                     help='SWA learning rate (default: 1/8)')
 parser.add_argument('--swa_c_epochs', type=int, default=1, metavar='N',
                     help='SWA model collection frequency/cycle length in epochs (default: 1)')
+parser.add_argument('--c_ratio', type=float, default=1, metavar='N',
+                    help='average per ratio * epoch')
 parser.add_argument('--seed', type=int, default=200, metavar='N',
                     help='random seed (default: 1)')
 parser.add_argument('--log-name', type=str, default='', metavar='S',
@@ -182,20 +184,24 @@ if args.momentum != 0:
 for name, param_acc in model.weight_acc.items():
     model.weight_acc[name] = param_acc.cuda()
 
-swa_model_dict = {}
 if args.swa:
     print('SWA training')
-    model_names = ['low_acc', 'full_tern', 'low_tern']
-    for model_name in model_names:
-        # use the same model config, i.e., quantizing activations
-        swa_model = model_cfg.base(
-            *model_cfg.args, num_classes=num_classes, **model_cfg.kwargs)
-        swa_model.cuda()
-        for name, param_acc in swa_model.weight_acc.items():
-            swa_model.weight_acc[name] = param_acc.cuda()
-        swa_model.weight_scale = model.weight_scale
-        swa_model_dict[model_name] = swa_model
-    swa_n = 0
+    ratios = [0.1, 0.05, 0.025, 0.01, 0.005]
+    cratio_swa_model_dict = {}
+    for r in ratios:
+       swa_model_dict = {}
+       model_names = ['full_acc', 'low_acc', 'full_tern', 'low_tern']
+       for model_name in model_names:
+           # use the same model config, i.e., quantizing activations
+           swa_model = model_cfg.base(
+               *model_cfg.args, num_classes=num_classes, **model_cfg.kwargs)
+           swa_model.cuda()
+           for name, param_acc in swa_model.weight_acc.items():
+               swa_model.weight_acc[name] = param_acc.cuda()
+           swa_model.weight_scale = model.weight_scale
+           swa_model_dict[model_name] = swa_model
+           swa_model_dict['swa_n'] = 0
+       cratio_swa_model_dict[r] = swa_model_dict
 
 def swa_quantizer(weight, scale, threshold):
     mask = weight.abs() > threshold
@@ -233,23 +239,19 @@ if args.swa:
     columns = columns[:-1] + ['swa_te_loss', 'swa_te_acc'] + columns[-1:]
     swa_res = {'loss': None, 'accuracy': None}
 
-def log_result(writer, name, res, step):
-    writer.add_scalar("{}/loss".format(name),     res['loss'],            step)
-    writer.add_scalar("{}/acc_perc".format(name), res['accuracy'],        step)
-    writer.add_scalar("{}/err_perc".format(name), 100. - res['accuracy'], step)
-
 loaders = get_data_loaders(args.dataset, args.data_path, args.val_ratio, args.batch_size, args.num_workers)
 
 # Save SWA models
 swa_to_save = {}
-for swa_model_name, swa_model in swa_model_dict.items():
-    swa_to_save[swa_model_name] = swa_model.weight_acc
+for ratio, swa_model_dict in cratio_swa_model_dict.items():
+    for swa_model_name, swa_model in swa_model_dict.items():
+        if swa_model_name == "swa_n": continue
+        swa_to_save["{}/{}".format(ratio, swa_model_name)] = swa_model.weight_acc
 
 utils.save_checkpoint(
     dir_name,
     0,
     acc_dict=model.weight_acc,
-    swa_n=swa_n if args.swa else None,
     **swa_to_save
 )
 
@@ -260,38 +262,43 @@ for epoch in range(start_epoch, args.epochs):
     assert args.grad_type == 'wage'
     grad_quantizer = lambda x : models.QG(x, args.wl_grad, args.wl_rand, lr)
 
-    train_res = utils.train_epoch(
-        loaders['train'], model, criterion,
-        weight_quantizer, grad_quantizer, writer, epoch,
-        log_error=args.log_error,
-        wage_quantize=True,
-        wage_grad_clip=grad_clip,
-        momentum = args.momentum
-    )
-    log_result(writer, "train", train_res, epoch+1)
+
+    if args.swa and (epoch + 1) >= args.swa_start and (epoch + 1 - args.swa_start) % args.swa_c_epochs == 0:
+        train_res = utils.train_epoch(
+            loaders, model, criterion,
+            weight_quantizer, grad_quantizer, writer, epoch,
+            log_error=args.log_error,
+            wage_quantize=True,
+            wage_grad_clip=grad_clip,
+            momentum = args.momentum,
+            cratio_swa_model_dict = cratio_swa_model_dict,
+        )
+    else:
+        train_res = utils.train_epoch(
+            loaders, model, criterion,
+            weight_quantizer, grad_quantizer, writer, epoch,
+            log_error=args.log_error,
+            wage_quantize=True,
+            wage_grad_clip=grad_clip,
+            momentum = args.momentum,
+            cratio_swa_model_dict = None
+           )
+    utils.log_result(writer, "train", train_res, epoch+1)
+
 
     all_result = {}
     if args.swa and (epoch + 1) >= args.swa_start and (epoch + 1 - args.swa_start) % args.swa_c_epochs == 0:
-        decay = 1.0 / (swa_n+1)
-        for swa_model_name, swa_model in swa_model_dict.items():
-            if 'tern' in swa_model_name:
-                target = 'tern'
-            elif 'acc' in swa_model_name:
-                target = 'acc'
-            else: raise ValueError("invalid swa model name {}".format(swa_model_name))
-            utils.moving_average(swa_model, model, decay,
-                                 average_target=target, swa_wl_weight=args.wl_weight)
-            if 'full' in swa_model_name:
-                test_res = utils.eval(loaders['test'], swa_model, criterion, None)
-                log_result(writer, '{}_test'.format(swa_model_name), test_res, epoch+1)
-            elif 'low' in swa_model_name:
-                for threshold in [0.2, 0.22, 0.24, 0.26, 0.28, 0.3]:
-                    threshold_quantizer = lambda weight, scale: swa_quantizer(weight, scale, threshold)
-                    test_res = utils.eval(loaders['test'], swa_model, criterion, threshold_quantizer)
-                    log_result(writer, '{}_threshold{}_test'.format(swa_model_name, threshold), test_res, epoch+1)
-            else: raise ValueError("invalid swa model name {}".format(swa_model_name))
-            all_result["{}_test".format(swa_model_name)] = test_res
-        swa_n += 1
+        for ratio, swa_model_dict in cratio_swa_model_dict.items():
+            for swa_model_name, swa_model in swa_model_dict.items():
+                if 'full' in swa_model_name:
+                    test_res = utils.eval(loaders['test'], swa_model, criterion, None)
+                    utils.log_result(writer, 'c{}/{}_test'.format(ratio, swa_model_name), test_res, epoch+1)
+                elif 'low' in swa_model_name:
+                    test_res = utils.eval(loaders['test'], swa_model, criterion, weight_quantizer)
+                    utils.log_result(writer, 'c{}/{}_test'.format(ratio, swa_model_name), test_res, epoch+1)
+                elif swa_model_name == 'swa_n': continue
+                else: raise ValueError("invalid swa model name {}".format(swa_model_name))
+                all_result["c{}/{}_test".format(ratio, swa_model_name)] = test_res
 
     # Write parameters
     if args.log_distribution:
@@ -304,19 +311,19 @@ for epoch in range(start_epoch, args.epochs):
             writer.add_histogram(
                 "gradient/%s"%name, param.grad.clone().cpu().data.numpy(), epoch)
 
-        for swa_model_name, swa_model in swa_model_dict.items():
-            # compute the histograms
-            for name, param in swa_model.named_parameters():
-                writer.add_histogram(
-                    "swa/%s/param/wacc-%s"%(swa_model_name, name),
-                    swa_model.weight_acc[name].clone().cpu().data.numpy(), epoch)
+        # for swa_model_name, swa_model in swa_model_dict.items():
+        #     # compute the histograms
+        #     for name, param in swa_model.named_parameters():
+        #         writer.add_histogram(
+        #             "swa/%s/param/wacc-%s"%(swa_model_name, name),
+        #             swa_model.weight_acc[name].clone().cpu().data.numpy(), epoch)
 
     # Validation
     test_res = utils.eval(loaders['test'], model, criterion, None)
-    log_result(writer, "base_acc_test", test_res, epoch+1)
+    utils.log_result(writer, "base_acc_test", test_res, epoch+1)
     all_result["base_acc_test"] = test_res
     test_res = utils.eval(loaders['test'], model, criterion, weight_quantizer)
-    log_result(writer, "base_test", test_res, epoch+1)
+    utils.log_result(writer, "base_test", test_res, epoch+1)
     all_result["base_test"] = test_res
 
     time_ep = time.time() - time_ep
@@ -333,23 +340,15 @@ for epoch in range(start_epoch, args.epochs):
     print(table)
 
     if (epoch+1) % args.save_freq == 0 or (epoch+1) >= args.swa_start:
-        # Save SWA models
         swa_to_save = {}
-        for swa_model_name, swa_model in swa_model_dict.items():
-            swa_to_save[swa_model_name] = swa_model.weight_acc
+        for ratio, swa_model_dict in cratio_swa_model_dict.items():
+            for swa_model_name, swa_model in swa_model_dict.items():
+                if swa_model_name == "swa_n": continue
+                swa_to_save["{}/{}".format(ratio, swa_model_name)] = swa_model.weight_acc
 
         utils.save_checkpoint(
             dir_name,
             epoch + 1,
             acc_dict=model.weight_acc,
-            swa_n=swa_n if args.swa else None,
             **swa_to_save
         )
-
-if len(swa_model_dict) > 0:
-    with open("swa_start_{}_swa_lr{}_lr{}.txt".format(int(args.swa_start), args.swa_lr, "_".join([str(x) for x in args.lr_schedules])), "a") as f:
-        names = ['base', 'low_tern', 'full_tern', 'low_acc']
-        record = [args.seed]
-        for n in names:
-            record.append(100-all_result['{}_test'.format(n)]['accuracy'])
-        f.write("\t".join([str(i) for i in record])+"\n")
