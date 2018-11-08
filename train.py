@@ -112,7 +112,6 @@ torch.manual_seed(args.seed)
 torch.cuda.manual_seed(args.seed)
 np.random.seed(args.seed)
 
-
 # Tensorboard Writer
 if args.log_name != "":
     log_name = "{}-{}-seed{}-{}".format( args.log_name, "swa" if args.swa else "sgd", args.seed, int(time.time()))
@@ -232,6 +231,7 @@ if args.resume is not None:
     start_epoch = checkpoint['epoch']-1
     model.weight_acc = checkpoint['acc_dict']
 
+
 # Prepare logging
 columns = ['ep', 'lr', 'tr_loss', 'tr_acc', 'tr_acc2',
            'te_loss', 'te_acc', 'te_acc2', 'time']
@@ -242,17 +242,10 @@ if args.swa:
 loaders = get_data_loaders(args.dataset, args.data_path, args.val_ratio, args.batch_size, args.num_workers)
 
 # Save SWA models
-swa_to_save = {}
-for ratio, swa_model_dict in cratio_swa_model_dict.items():
-    for swa_model_name, swa_model in swa_model_dict.items():
-        if swa_model_name == "swa_n": continue
-        swa_to_save["{}/{}".format(ratio, swa_model_name)] = swa_model.weight_acc
-
 utils.save_checkpoint(
     dir_name,
     0,
     acc_dict=model.weight_acc,
-    **swa_to_save
 )
 
 for epoch in range(start_epoch, args.epochs):
@@ -311,12 +304,6 @@ for epoch in range(start_epoch, args.epochs):
             writer.add_histogram(
                 "gradient/%s"%name, param.grad.clone().cpu().data.numpy(), epoch)
 
-        # for swa_model_name, swa_model in swa_model_dict.items():
-        #     # compute the histograms
-        #     for name, param in swa_model.named_parameters():
-        #         writer.add_histogram(
-        #             "swa/%s/param/wacc-%s"%(swa_model_name, name),
-        #             swa_model.weight_acc[name].clone().cpu().data.numpy(), epoch)
 
     # Validation
     test_res = utils.eval(loaders['test'], model, criterion, None)
@@ -339,16 +326,28 @@ for epoch in range(start_epoch, args.epochs):
         table = table.split('\n')[2]
     print(table)
 
-    if (epoch+1) % args.save_freq == 0 or (epoch+1) >= args.swa_start:
-        swa_to_save = {}
-        for ratio, swa_model_dict in cratio_swa_model_dict.items():
-            for swa_model_name, swa_model in swa_model_dict.items():
-                if swa_model_name == "swa_n": continue
-                swa_to_save["{}/{}".format(ratio, swa_model_name)] = swa_model.weight_acc
-
+    if (epoch+1) % args.save_freq == 0:
         utils.save_checkpoint(
             dir_name,
             epoch + 1,
             acc_dict=model.weight_acc,
-            **swa_to_save
         )
+
+os.makedirs("diffc", exist_ok=True)
+ratio_result = {}
+for avg_name in ['full_acc', 'low_acc', 'full_tern', 'low_tern']:
+    ratio_result[avg_name] = []
+for ratio, swa_model_dict in cratio_swa_model_dict.items():
+    for swa_model_name, swa_model in swa_model_dict.items():
+        if swa_model_name == "swa_n": continue
+        swa_model = swa_model_dict[swa_model_name]
+        if 'full' in swa_model_name:
+            test_res = utils.eval(loaders['test'], swa_model, criterion, None)
+        elif 'low' in swa_model_name:
+            test_res = utils.eval(loaders['test'], swa_model, criterion, weight_quantizer)
+        ratio_result[swa_model_name].append(100-test_res['accuracy'])
+for avg_name in ['full_acc', 'low_acc', 'full_tern', 'low_tern']:
+    with open("diffc/{}_{}_result.csv".format(args.log_name, avg_name), "a") as f:
+        f.write("{},".format(args.seed))
+        f.write(",".join([str(acc) for acc in ratio_result[avg_name]]))
+        f.write("\n")
