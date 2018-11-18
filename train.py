@@ -184,12 +184,12 @@ for name, param_acc in model.weight_acc.items():
     model.weight_acc[name] = param_acc.cuda()
 
 if args.swa:
+    model_names = ['full_acc', 'full_tern']
     print('SWA training')
-    ratios = [0.1, 0.05, 0.025, 0.01, 0.005]
+    ratios = [1, 0.5, 0.1, 0.05, 0.025, 0.01, 0.005]
     cratio_swa_model_dict = {}
     for r in ratios:
        swa_model_dict = {}
-       model_names = ['full_acc', 'low_acc', 'full_tern', 'low_tern']
        for model_name in model_names:
            # use the same model config, i.e., quantizing activations
            swa_model = model_cfg.base(
@@ -327,27 +327,46 @@ for epoch in range(start_epoch, args.epochs):
     print(table)
 
     if (epoch+1) % args.save_freq == 0:
-        utils.save_checkpoint(
-            dir_name,
-            epoch + 1,
-            acc_dict=model.weight_acc,
-        )
+        if args.swa and (epoch + 1) >= args.swa_start:
+            swa_to_save = {}
+            for ratio, swa_model_dict in cratio_swa_model_dict.items():
+                   for swa_model_name, swa_model in swa_model_dict.items():
+                       if swa_model_name == "swa_n": continue
+                       swa_to_save["{}/{}".format(ratio, swa_model_name)] = swa_model.weight_acc
+            utils.save_checkpoint(
+                   dir_name,
+                   epoch + 1,
+                   acc_dict=model.weight_acc,
+                   **swa_to_save
+            )
+        else:
+            utils.save_checkpoint(
+                   dir_name,
+                   epoch + 1,
+                   acc_dict=model.weight_acc
+            )
 
-os.makedirs("diffc", exist_ok=True)
-ratio_result = {}
-for avg_name in ['full_acc', 'low_acc', 'full_tern', 'low_tern']:
-    ratio_result[avg_name] = []
-for ratio, swa_model_dict in cratio_swa_model_dict.items():
-    for swa_model_name, swa_model in swa_model_dict.items():
-        if swa_model_name == "swa_n": continue
-        swa_model = swa_model_dict[swa_model_name]
-        if 'full' in swa_model_name:
-            test_res = utils.eval(loaders['test'], swa_model, criterion, None)
-        elif 'low' in swa_model_name:
-            test_res = utils.eval(loaders['test'], swa_model, criterion, weight_quantizer)
-        ratio_result[swa_model_name].append(100-test_res['accuracy'])
-for avg_name in ['full_acc', 'low_acc', 'full_tern', 'low_tern']:
-    with open("diffc/{}_{}_result.csv".format(args.log_name, avg_name), "a") as f:
+
+if args.swa:
+    os.makedirs("diffc", exist_ok=True)
+    ratio_result = {}
+    for avg_name in model_names:
+        ratio_result[avg_name] = []
+    for ratio, swa_model_dict in cratio_swa_model_dict.items():
+        for swa_model_name, swa_model in swa_model_dict.items():
+            if swa_model_name == "swa_n": continue
+            swa_model = swa_model_dict[swa_model_name]
+            if 'full' in swa_model_name:
+                test_res = utils.eval(loaders['test'], swa_model, criterion, None)
+            elif 'low' in swa_model_name:
+                test_res = utils.eval(loaders['test'], swa_model, criterion, weight_quantizer)
+            ratio_result[swa_model_name].append(100-test_res['accuracy'])
+    with open("diffc/{}_base_result.csv".format(args.log_name, avg_name), "a") as f:
         f.write("{},".format(args.seed))
-        f.write(",".join([str(acc) for acc in ratio_result[avg_name]]))
+        f.write(all_result["base_test"])
         f.write("\n")
+    for avg_name in model_names:
+        with open("diffc/{}_{}_result.csv".format(args.log_name, avg_name), "a") as f:
+            f.write("{},".format(args.seed))
+            f.write(",".join([str(acc) for acc in ratio_result[avg_name]]))
+            f.write("\n")
